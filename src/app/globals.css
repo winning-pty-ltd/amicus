@@ -27,25 +27,25 @@
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 169 74% 22%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 169 74% 22%;
+    --background: 25 14% 15%; /* Dark background */
+    --foreground: 0 0% 100%; /* Bright text for contrast */
+    --card: 33 20% 20%; /* Dark card backgrounds */
+    --card-foreground: 0 0% 100%; /* Bright text on cards */
+    --popover: 25 14% 15%; /* Dark popover */
+    --popover-foreground: 0 0% 100%; /* Bright text on popover */
+    --primary: 210 100% 80%; /* Bright primary color */
+    --primary-foreground: 25 14% 15%; /* Dark text on primary color */
+    --secondary: 240 7% 26%; /* Darker secondary color */
+    --secondary-foreground: 0 0% 100%; /* Bright text on secondary color */
+    --muted: 240 7% 26%; /* Darker muted color */
+    --muted-foreground: 240 5% 80%; /* Lighter text on muted color */
+    --accent: 240 7% 26%; /* Darker accent color */
+    --accent-foreground: 0 0% 100%; /* Bright text on accent color */
+    --destructive: 0 100% 67%; /* Bright red for destructive actions */
+    --destructive-foreground: 25 14% 15%; /* Dark text on destructive color */
+    --border: 240 7% 26%; /* Darker border color */
+    --input: 240 7% 26%; /* Darker input fields */
+    --ring: 210 100% 80%; /* Bright ring color */
   }
 }
 
