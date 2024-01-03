@@ -2,25 +2,25 @@
 
 import { userHashedId } from "@/features/auth/helpers";
 import { CosmosDBContainer } from "@/features/common/cosmos";
-import { AzureCogSearch } from "@/features/langchain/vector-stores/azure-cog-search/azure-cog-vector-store";
+
+import { uniqueId } from "@/features/common/util";
 import {
   AzureKeyCredential,
   DocumentAnalysisClient,
 } from "@azure/ai-form-recognizer";
-import { Document } from "langchain/document";
-import { OpenAIEmbeddings } from "langchain/embeddings/openai";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { nanoid } from "nanoid";
+import { SqlQuerySpec } from "@azure/cosmos";
+import {
+  AzureCogDocumentIndex,
+  ensureIndexIsCreated,
+  indexDocuments,
+} from "./azure-cog-search/azure-cog-vector-store";
 import {
   CHAT_DOCUMENT_ATTRIBUTE,
   ChatDocumentModel,
-  ChatMessageModel,
-  FaqDocumentIndex,
-  MESSAGE_ATTRIBUTE,
   ServerActionResponse,
 } from "./models";
+import { chunkDocumentWithOverlap } from "./text-chunk";
 import { isNotNullOrEmpty } from "./utils";
-import { SqlQuerySpec } from "@azure/cosmos";
 
 const MAX_DOCUMENT_SIZE = 20000000;
 
@@ -31,13 +31,12 @@ export const UploadDocument = async (
     await ensureSearchIsConfigured();
 
     const { docs } = await LoadFile(formData);
-    const splitDocuments = await SplitDocuments(docs);
-    const docPageContents = splitDocuments.map((item) => item.pageContent);
+    const splitDocuments = chunkDocumentWithOverlap(docs.join("\n"));
 
     return {
       success: true,
       error: "",
-      response: docPageContents,
+      response: splitDocuments,
     };
   } catch (e) {
     return {
@@ -58,22 +57,16 @@ const LoadFile = async (formData: FormData) => {
       const blob = new Blob([file], { type: file.type });
 
       const poller = await client.beginAnalyzeDocument(
-        "prebuilt-document",
+        "prebuilt-read",
         await blob.arrayBuffer()
       );
       const { paragraphs } = await poller.pollUntilDone();
 
-      const docs: Document[] = [];
+      const docs: Array<string> = [];
 
       if (paragraphs) {
         for (const paragraph of paragraphs) {
-          const doc: Document = {
-            pageContent: paragraph.content,
-            metadata: {
-              file: file.name,
-            },
-          };
-          docs.push(doc);
+          docs.push(paragraph.content);
         }
       }
 
@@ -96,41 +89,17 @@ const LoadFile = async (formData: FormData) => {
   throw new Error("Invalid file format or size. Only PDF files are supported.");
 };
 
-const SplitDocuments = async (docs: Array<Document>) => {
-  const allContent = docs.map((doc) => doc.pageContent).join("\n");
-  const splitter = new RecursiveCharacterTextSplitter();
-  const output = await splitter.createDocuments([allContent]);
-  return output;
-};
-
-export const DeleteDocuments = async (chatThreadId: string) => {
-  try {
-
-    const vectorStore = initAzureSearchVectorStore();
-    await vectorStore.deleteDocuments(chatThreadId);
-
-  } catch (e) {
-    console.log("************");
-    return {
-      success: false,
-      error: (e as Error).message,
-      response: [],
-    };
-  }
-};
-
 export const IndexDocuments = async (
   fileName: string,
   docs: string[],
   chatThreadId: string
-): Promise<ServerActionResponse<FaqDocumentIndex[]>> => {
+): Promise<ServerActionResponse<AzureCogDocumentIndex[]>> => {
   try {
-    const vectorStore = initAzureSearchVectorStore();
-    const documentsToIndex: FaqDocumentIndex[] = [];
-    let index = 0;
+    const documentsToIndex: AzureCogDocumentIndex[] = [];
+
     for (const doc of docs) {
-      const docToAdd: FaqDocumentIndex = {
-        id: nanoid(),
+      const docToAdd: AzureCogDocumentIndex = {
+        id: uniqueId(),
         chatThreadId,
         user: await userHashedId(),
         pageContent: doc,
@@ -139,10 +108,10 @@ export const IndexDocuments = async (
       };
 
       documentsToIndex.push(docToAdd);
-      index++;
     }
 
-    await vectorStore.addDocuments(documentsToIndex);
+    await indexDocuments(documentsToIndex);
+
     await UpsertChatDocument(fileName, chatThreadId);
     return {
       success: true,
@@ -150,7 +119,7 @@ export const IndexDocuments = async (
       response: documentsToIndex,
     };
   } catch (e) {
-    console.log("************");
+    console.log(e);
     return {
       success: false,
       error: (e as Error).message,
@@ -159,26 +128,10 @@ export const IndexDocuments = async (
   }
 };
 
-export const initAzureSearchVectorStore = () => {
-  const embedding = new OpenAIEmbeddings();
-  const azureSearch = new AzureCogSearch<FaqDocumentIndex>(embedding, {
-    name: process.env.AZURE_SEARCH_NAME,
-    indexName: process.env.AZURE_SEARCH_INDEX_NAME,
-    apiKey: process.env.AZURE_SEARCH_API_KEY,
-    apiVersion: process.env.AZURE_SEARCH_API_VERSION,
-    vectorFieldName: "embedding",
-  });
-
-  return azureSearch;
-};
-
 export const initDocumentIntelligence = () => {
   const client = new DocumentAnalysisClient(
     process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT,
-    new AzureKeyCredential(process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY),
-    {
-      apiVersion: "2022-08-31",
-    }
+    new AzureKeyCredential(process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY)
   );
 
   return client;
@@ -219,7 +172,7 @@ export const UpsertChatDocument = async (
 ) => {
   const modelToSave: ChatDocumentModel = {
     chatThreadId: chatThreadID,
-    id: nanoid(),
+    id: uniqueId(),
     userId: await userHashedId(),
     createdAt: new Date(),
     type: CHAT_DOCUMENT_ATTRIBUTE,
@@ -260,6 +213,5 @@ export const ensureSearchIsConfigured = async () => {
     throw new Error("Azure openai embedding variables are not configured.");
   }
 
-  const vectorStore = initAzureSearchVectorStore();
-  await vectorStore.ensureIndexIsCreated();
+  await ensureIndexIsCreated();
 };

@@ -13,6 +13,7 @@ param embeddingDeploymentName string = 'text-embedding-ada-002'
 param embeddingDeploymentCapacity int = 30
 param embeddingModelName string = 'text-embedding-ada-002'
 
+param speechServiceSkuName string = 'S0'
 param formRecognizerSkuName string = 'S0'
 param searchServiceSkuName string = 'standard'
 param searchServiceIndexName string = 'azure-chat'
@@ -27,6 +28,7 @@ param tags object = {}
 
 var openai_name = toLower('${name}ai${resourceToken}')
 var form_recognizer_name = toLower('${name}-form-${resourceToken}')
+var speech_service_name = toLower('${name}-speech-${resourceToken}')
 var cosmos_name = toLower('${name}-cosmos-${resourceToken}')
 var search_name = toLower('${name}search${resourceToken}')
 var webapp_name = toLower('${name}-webapp-${resourceToken}')
@@ -34,6 +36,8 @@ var appservice_name = toLower('${name}-app-${resourceToken}')
 // keyvault name must be less than 24 chars - token is 13
 var kv_prefix = take(name, 7)
 var keyVaultName = toLower('${kv_prefix}-kv-${resourceToken}')
+var la_workspace_name = toLower('${name}-la-${resourceToken}')
+var diagnostic_setting_name = 'AppServiceConsoleLogs'
 
 var keyVaultSecretsUserRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
 
@@ -63,7 +67,6 @@ var deployments = [
     capacity: embeddingDeploymentCapacity
   }
 ]
-
 
 resource appServicePlan 'Microsoft.Web/serverfarms@2020-06-01' = {
   name: appservice_name
@@ -101,8 +104,8 @@ resource webApp 'Microsoft.Web/sites@2020-06-01' = {
           value: '@Microsoft.KeyVault(VaultName=${kv.name};SecretName=${kv::AZURE_COSMOSDB_KEY.name})'
         }
         {
-          name: 'AZURE_OPENAI_API_KEY'
-          value: '@Microsoft.KeyVault(VaultName=${kv.name};SecretName=${kv::AZURE_OPENAI_API_KEY.name})'
+          name: 'OPENAI_API_KEY'
+          value: '@Microsoft.KeyVault(VaultName=${kv.name};SecretName=${kv::OPENAI_API_KEY.name})'
         }
         {
           name: 'AZURE_DOCUMENT_INTELLIGENCE_KEY'
@@ -126,7 +129,7 @@ resource webApp 'Microsoft.Web/sites@2020-06-01' = {
         }
         { 
           name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
-          value: 'https://${location}.api.cognitive.microsoft.com/'
+          value: 'https://${form_recognizer_name}.cognitiveservices.azure.com/'
         }
         { 
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
@@ -160,10 +163,38 @@ resource webApp 'Microsoft.Web/sites@2020-06-01' = {
           name: 'NEXTAUTH_URL'
           value: 'https://${webapp_name}.azurewebsites.net'
         }
+        {
+          name: 'AZURE_SPEECH_REGION'
+          value: resourceGroup().location
+        }
+        {
+          name: 'AZURE_SPEECH_KEY'
+          value: '@Microsoft.KeyVault(VaultName=${kv.name};SecretName=${kv::AZURE_SPEECH_KEY.name})'
+        }
       ]
     }
   }
   identity: { type: 'SystemAssigned'}
+}
+
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2021-12-01-preview' = {
+  name: la_workspace_name
+  location: location
+}
+
+resource webDiagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: diagnostic_setting_name
+  scope: webApp
+  properties: {
+    workspaceId: logAnalyticsWorkspace.id
+    logs: [
+      {
+        category: 'AppServiceConsoleLogs'
+        enabled: true
+      }
+    ]
+    metrics: []
+  }
 }
 
 resource kvFunctionAppPermissions 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
@@ -199,7 +230,7 @@ resource kv 'Microsoft.KeyVault/vaults@2021-06-01-preview' = {
     }
   }
 
-  resource AZURE_OPENAI_API_KEY 'secrets' = {
+  resource OPENAI_API_KEY 'secrets' = {
     name: 'AZURE-OPENAI-API-KEY'
     properties: {
       contentType: 'text/plain'
@@ -214,6 +245,15 @@ resource kv 'Microsoft.KeyVault/vaults@2021-06-01-preview' = {
       value: formRecognizer.listKeys().key1
     }
   }
+
+  resource AZURE_SPEECH_KEY 'secrets' = {
+    name: 'AZURE-SPEECH-KEY'
+    properties: {
+      contentType: 'text/plain'
+      value: speechService.listKeys().key1
+    }
+  }
+
 
   resource AZURE_SEARCH_API_KEY 'secrets' = {
     name: 'AZURE-SEARCH-API-KEY'
@@ -269,7 +309,6 @@ resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
         ]
         kind: 'Hash'
       }
-      defaultTtl: 86400
     }
   }
 }
@@ -330,5 +369,18 @@ resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01
   }
 }]
 
+resource speechService 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
+  name: speech_service_name
+  location: location
+  tags: tags
+  kind: 'SpeechServices'
+  properties: {
+    customSubDomainName: speech_service_name
+    publicNetworkAccess: 'Enabled'
+  }
+  sku: {
+    name: speechServiceSkuName
+  }
+}
 
 output url string = 'https://${webApp.properties.defaultHostName}'
